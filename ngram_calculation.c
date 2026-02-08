@@ -3,8 +3,11 @@
 #include <string.h>
 #include <inttypes.h>
 
+#ifdef __MACH__
 #include <mach/clock.h>
 #include <mach/mach.h>
+#endif
+
 #include <time.h>
 #include "hashtable.h"
 #include "list.h"
@@ -102,8 +105,6 @@ void suggests_test(int argc, char **argv) {
 	fclose(fd);
 	struct timespec loaded;
 	clock_gettime(CLOCK_REALTIME, &loaded);
-
-	uint64_t maxnum = 1000 * 4;
 
 	ngram_index_delete(ngram_index);
 }
