@@ -1,4 +1,4 @@
-all: ngram_calculation trie
+all: ngram_calculation trie quantiles
 
 ngram_calculation:
 	cc -I hashtable ngram.c hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c ngram_calculation.c -o ngram_calculation
@@ -10,4 +10,4 @@ quantiles:
 	cc quantiles.c qtree/qtree.c -o quantiles
 
 clean:
-	rm -f trie ngram_calculation
+	rm -f trie ngram_calculation quantiles
