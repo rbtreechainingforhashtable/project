@@ -55,3 +55,5 @@ dkms.conf
 *.dwo
 
 ngram_calculation
+quantiles
+trie
