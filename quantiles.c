@@ -5,7 +5,7 @@
 #include <inttypes.h>
 #include <time.h>
 #include <math.h>
-#include "qtree.h"
+#include "qtree/qtree.h"
 
 uint64_t nsec_tree;
 typedef struct list_node {

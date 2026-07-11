@@ -7,7 +7,7 @@ trie:
 	cc -I hashtable trie.c -o trie
 
 quantiles:
-	cc quantiles.c qtree.c -o quantiles
+	cc quantiles.c qtree/qtree.c -o quantiles
 
 clean:
 	rm -f trie ngram_calculation
