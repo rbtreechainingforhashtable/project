@@ -1,13 +1,110 @@
-all: ngram_calculation trie quantiles
+CC ?= cc
+CFLAGS ?= -O2 -Wall -Wextra
+TOMMYDIR ?= other-ht/tommyds/tommyds
+TOMMY_CFLAGS = -I$(TOMMYDIR) -include string.h -include $(TOMMYDIR)/tommylist.h
 
-ngram_calculation:
-	cc -I hashtable ngram.c hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c ngram_calculation.c -o ngram_calculation
+HASHTABLE_SRC = hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
+NGRAM_SRC = ngram.c $(HASHTABLE_SRC)
+COMMON_SRC = common/randstring.c
 
-trie:
-	cc -I hashtable trie.c -o trie
+BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles
 
-quantiles:
-	cc quantiles.c qtree/qtree.c -o quantiles
+.PHONY: all clean help \
+	run-ngram-growth run-inverted-index run-trie run-hashtable-benchmark run-quantiles \
+	run-inverted-index-all run-trie-all run-hashtable-all run-quantiles-all
+
+all: $(BINARIES)
+
+help:
+	@echo "Build all experiments:"
+	@echo "  make"
+	@echo ""
+	@echo "Build one experiment:"
+	@echo "  make ngram_calculation"
+	@echo "  make inverted_index"
+	@echo "  make trie"
+	@echo "  make hashtable_benchmark"
+	@echo "  make quantiles"
+	@echo ""
+	@echo "Run one experiment:"
+	@echo "  make run-ngram-growth"
+	@echo "  make run-inverted-index LETTERS=3 QUERIES=4000"
+	@echo "  make run-trie LETTERS=3 QUERIES=4000"
+	@echo "  make run-hashtable-benchmark IMPL=custom KEYS=100000"
+	@echo "  make run-quantiles SIZE=1024 TREE_HEIGHT=5"
+	@echo ""
+	@echo "Run article benchmark suites:"
+	@echo "  make run-inverted-index-all"
+	@echo "  make run-trie-all"
+	@echo "  make run-hashtable-all"
+	@echo "  make run-quantiles-all"
+	@echo ""
+	@echo "TommyDS support (local clone in other-ht/tommyds):"
+	@echo "  make hashtable_benchmark"
+	@echo "  make run-hashtable-benchmark IMPL=tommy KEYS=100000"
+	@echo "  make run-hashtable-all KEYS=100000"
+
+ngram_calculation: ngram_calculation.c common/lineio.c $(NGRAM_SRC)
+	$(CC) $(CFLAGS) -Ihashtable -Icommon ngram_calculation.c common/lineio.c $(NGRAM_SRC) -o $@
+
+inverted_index: inverted_index.c common/lineio.c $(NGRAM_SRC)
+	$(CC) $(CFLAGS) -Ihashtable -Icommon inverted_index.c common/lineio.c $(NGRAM_SRC) -o $@
+
+trie: trie.c common/lineio.c
+	$(CC) $(CFLAGS) -Icommon trie.c common/lineio.c -o $@
+
+hashtable_benchmark: hashtable_benchmark.c $(HASHTABLE_SRC) $(COMMON_SRC)
+	$(CC) $(CFLAGS) -Ihashtable -Icommon hashtable_benchmark.c $(HASHTABLE_SRC) $(COMMON_SRC) \
+		$(TOMMY_CFLAGS) -DWITH_TOMMY $(TOMMYDIR)/tommy.c \
+		-o $@
+
+quantiles: quantiles.c qtree/qtree.c
+	$(CC) $(CFLAGS) -lm quantiles.c qtree/qtree.c -o $@
+
+WORDS ?= vendor/english-words/words_alpha.txt
+LETTERS ?= 3
+QUERIES ?= 4000
+IMPL ?= custom
+KEYS ?= 33554432
+KEY_LEN ?= 10
+DATA_FILE ?= /tmp/hashtable-benchmark-keys.txt
+SIZE ?= 1024
+TREE_HEIGHT ?= 5
+SEED ?= 1
+
+run-ngram-growth: ngram_calculation
+	./ngram_calculation --words $(WORDS)
+
+run-inverted-index: inverted_index
+	./inverted_index --words $(WORDS) --letters $(LETTERS) --queries $(QUERIES)
+
+run-inverted-index-all: inverted_index
+	@for letters in 3 4 5 6; do \
+		./inverted_index --words $(WORDS) --letters $$letters --queries $(QUERIES); \
+	done
+
+run-trie: trie
+	./trie --words $(WORDS) --letters $(LETTERS) --queries $(QUERIES)
+
+run-trie-all: trie
+	./trie --words $(WORDS) --all --queries $(QUERIES)
+
+run-hashtable-benchmark: hashtable_benchmark
+	./hashtable_benchmark --impl $(IMPL) --keys $(KEYS) --key-len $(KEY_LEN) --data-file $(DATA_FILE) --seed $(SEED)
+
+run-hashtable-all: hashtable_benchmark
+	@for impl in gnu custom tommy; do \
+		./hashtable_benchmark --impl $$impl --keys $(KEYS) --key-len $(KEY_LEN) --data-file $(DATA_FILE) --seed $(SEED); \
+	done
+
+run-quantiles: quantiles
+	./quantiles --size $(SIZE) --tree-height $(TREE_HEIGHT) --seed $(SEED)
+
+run-quantiles-all: quantiles
+	@for cfg in "1024 4" "4096 4" "4096 5" "16384 5" "16384 6"; do \
+		set -- $$cfg; \
+		./quantiles --size $$1 --tree-height $$2 --baseline --seed $(SEED); \
+	done
 
 clean:
-	rm -f trie ngram_calculation quantiles
+	rm -f $(BINARIES)

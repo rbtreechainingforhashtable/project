@@ -55,5 +55,10 @@ dkms.conf
 *.dwo
 
 ngram_calculation
+inverted_index
 quantiles
 trie
+hashtable_benchmark
+/tmp/hashtable-benchmark-keys.txt
+other-ht/ht_tommy
+other-ht/newdata.txt
