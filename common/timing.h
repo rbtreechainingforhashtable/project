@@ -3,6 +3,13 @@
 #include <stdint.h>
 #include <time.h>
 
+/*
+ * Monotonic elapsed wall time (seconds).
+ *
+ * Uses CLOCK_MONOTONIC: real elapsed time between two samples, not CPU time.
+ * Suitable for end-to-end benchmark phases; includes scheduler and I/O waits.
+ */
+
 static inline void timespec_now(struct timespec *ts)
 {
     clock_gettime(CLOCK_MONOTONIC, ts);

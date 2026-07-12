@@ -11,8 +11,11 @@ Code and benchmarks for the article *Using RB-tree chaining within a hash table*
 | Trie prefix search | `trie` | Trie vs inverted index comparison | [experiments/trie/README.md](experiments/trie/README.md) |
 | Hashtable libraries | `hashtable_benchmark` | Comparing speed with other hashtable libraries | [experiments/hashtable-benchmark/README.md](experiments/hashtable-benchmark/README.md) |
 | Quantiles | `quantiles` | Quantile calculating with ordered hash table | [experiments/quantiles/README.md](experiments/quantiles/README.md) |
+| Chaining (list vs tree) | `chaining_benchmark` | List versus tree bucket chaining | [experiments/chaining-benchmark/README.md](experiments/chaining-benchmark/README.md) |
 
 ## Quick start
+
+Methodology (hardware, compiler flags, timing, metrics, datasets): [docs/benchmark-methodology.md](docs/benchmark-methodology.md).
 
 ```bash
 make
@@ -36,6 +39,10 @@ make run-hashtable-benchmark IMPL=custom KEYS=100000
 
 make quantiles
 make run-quantiles SIZE=1024 TREE_HEIGHT=5
+
+make chaining_benchmark
+make run-chaining-compare CHAIN_KEYS=500000
+make run-chaining-treeify CHAIN_KEYS=500000
 ```
 
 Run the benchmark suites used in the article tables:

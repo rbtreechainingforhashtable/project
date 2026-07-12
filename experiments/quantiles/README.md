@@ -4,12 +4,27 @@
 
 Section **Quantile calculating with ordered hash table** in `draft.tex`.
 
+## Methodology
+
+See [docs/benchmark-methodology.md](../../docs/benchmark-methodology.md) (111.11M synthetic samples, monotonic wall-clock insert/search phases).
+
 ## What it does
 
-1. Generates a skewed synthetic workload of floating-point samples.
-2. Inserts samples into an ordered RB-tree chained hash table.
-3. Calculates quantiles `q(0.5)`, `q(0.9)`, and `q(0.99)`.
-4. Optionally compares against a sorted-array baseline with `--baseline`.
+1. Generates a skewed synthetic workload of floating-point samples (111.11M total).
+2. Inserts samples into an ordered RB-tree chained hash table (`B` buckets, `tree_height` cap).
+3. Computes approximate global quantiles `q(0.5)`, `q(0.9)`, `q(0.99)`.
+4. With `--baseline`, compares against exact sample quantiles after full sort.
+
+## Precision model
+
+| Level | Exact? |
+|-------|--------|
+| Total count $N$ | Yes — every insert increments mass |
+| `tree_quantile` within one bucket | Yes among keys represented in that bucket's tree |
+| Distinct keys per bucket | Partial — `tree_height` merges deeper inserts into ancestor counts |
+| Global $q(\alpha)$ vs sorted baseline | **No** — coarse bucket routing + cross-bucket heuristic |
+
+See `draft.tex` Section *Precision model* and the quantile-error table for empirical absolute error vs baseline.
 
 ## Build
 

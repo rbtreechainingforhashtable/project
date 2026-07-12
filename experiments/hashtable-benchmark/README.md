@@ -4,6 +4,10 @@
 
 Section **Comparing speed with other hashtable libraries** in `draft.tex`.
 
+## Methodology
+
+Hardware (Apple M4 Pro, 48 GB, macOS 26.5.1), compiler flags (`-O2`, no LTO), monotonic wall-clock timing, dataset sizes, and metric definitions: [docs/benchmark-methodology.md](../../docs/benchmark-methodology.md).
+
 ## What it does
 
 1. Generates randomized string keys.

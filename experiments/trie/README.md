@@ -4,12 +4,18 @@
 
 Section **Chaining methods testing** in `draft.tex`, especially the comparison table between trie and inverted index.
 
+## Methodology
+
+See [docs/benchmark-methodology.md](../../docs/benchmark-methodology.md).
+
 ## What it does
 
 1. Loads all dictionary words into a simple prefix trie.
-2. Selects words of a fixed length from the dictionary.
-3. Performs prefix lookups and enumerates all trie matches under each prefix.
-4. Reports trie load time, search time, matched node count, and results per query.
+2. Selects words of a fixed length from the dictionary (same 4,000-query workload as `inverted_index`).
+3. For each query word $w$, navigates to prefix $w$ and enumerates every dictionary word that **starts with** $w$ (prefix completion).
+4. Reports trie load time, search time, emitted match count, and matches per query.
+
+**Query model:** prefix completion, not $n$-gram overlap. Match counts are much smaller than the inverted index on the same query strings because the trie returns extensions of $w$, not every word sharing a bigram with $w$. See `draft.tex` Section *Query models and comparison scope*.
 
 ## Build
 

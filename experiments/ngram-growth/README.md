@@ -6,6 +6,10 @@ Section **Chaining methods testing / Natural language processing with hash table
 
 This experiment measures how the number of unique trigrams grows while loading an English dictionary into an inverted index backed by an RB-tree chained hash table.
 
+## Methodology
+
+See [docs/benchmark-methodology.md](../../docs/benchmark-methodology.md).
+
 ## What it does
 
 1. Reads words from `vendor/english-words/words_alpha.txt`.

@@ -4,12 +4,18 @@
 
 Section **Chaining methods testing** in `draft.tex`, especially the comparison table between the inverted index and trie.
 
+## Methodology
+
+See [docs/benchmark-methodology.md](../../docs/benchmark-methodology.md) (platform, `-O2` build, wall-clock phases, dictionary size 370,105 words).
+
 ## What it does
 
 1. Builds an inverted index from the dictionary using `2/3/4/5-grams`.
 2. Selects words of a fixed length from the same dictionary.
-3. Runs substring-style lookups through the inverted index.
-4. Reports load time, search time, matched node count, and results per query.
+3. For each query word $w$, unions posting lists for all $n$-grams of $w$ and counts distinct matching words ($n$-gram overlap retrieval).
+4. Reports load time, search time, emitted match count, and matches per query.
+
+**Query model:** this is *not* prefix matching. A 3-letter query uses bigrams, so posting lists are large and `matched` counts are orders of magnitude higher than a trie prefix completion on the same query strings. See Section *Query models and comparison scope* in `draft.tex` and [../trie/README.md](../trie/README.md).
 
 ## Build
 

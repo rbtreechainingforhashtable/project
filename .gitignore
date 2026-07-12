@@ -59,6 +59,7 @@ inverted_index
 /quantiles
 /trie
 hashtable_benchmark
+chaining_benchmark
 /tmp/hashtable-benchmark-keys.txt
 other-ht/ht_tommy
 other-ht/newdata.txt

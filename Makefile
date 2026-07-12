@@ -7,10 +7,13 @@ HASHTABLE_SRC = hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
 NGRAM_SRC = ngram.c $(HASHTABLE_SRC)
 COMMON_SRC = common/randstring.c
 
-BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles
+BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles chaining_benchmark
+
+CHAINING_SRC = hashtable/chain_ht.c hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
 
 .PHONY: all clean help \
 	run-ngram-growth run-inverted-index run-trie run-hashtable-benchmark run-quantiles \
+	run-chaining-compare run-chaining-treeify run-chaining-compare-repeated \
 	run-inverted-index-all run-trie-all run-hashtable-all run-quantiles-all
 
 all: $(BINARIES)
@@ -24,7 +27,7 @@ help:
 	@echo "  make inverted_index"
 	@echo "  make trie"
 	@echo "  make hashtable_benchmark"
-	@echo "  make quantiles"
+	@echo "  make chaining_benchmark"
 	@echo ""
 	@echo "Run one experiment:"
 	@echo "  make run-ngram-growth"
@@ -42,7 +45,9 @@ help:
 	@echo "TommyDS support (local clone in other-ht/tommyds):"
 	@echo "  make hashtable_benchmark"
 	@echo "  make run-hashtable-benchmark IMPL=tommy KEYS=100000"
-	@echo "  make run-hashtable-all KEYS=100000"
+	@echo "  make run-chaining-compare CHAIN_KEYS=500000"
+	@echo "  make run-chaining-compare-repeated BENCH_RUNS=5 CHAIN_KEYS=500000"
+	@echo "  make run-chaining-treeify CHAIN_KEYS=500000"
 
 ngram_calculation: ngram_calculation.c common/lineio.c $(NGRAM_SRC)
 	$(CC) $(CFLAGS) -Ihashtable -Icommon ngram_calculation.c common/lineio.c $(NGRAM_SRC) -o $@
@@ -61,6 +66,9 @@ hashtable_benchmark: hashtable_benchmark.c $(HASHTABLE_SRC) $(COMMON_SRC)
 quantiles: quantiles.c qtree/qtree.c
 	$(CC) $(CFLAGS) -lm quantiles.c qtree/qtree.c -o $@
 
+chaining_benchmark: chaining_benchmark.c $(CHAINING_SRC) $(COMMON_SRC)
+	$(CC) $(CFLAGS) -Ihashtable -Icommon chaining_benchmark.c $(CHAINING_SRC) $(COMMON_SRC) -o $@
+
 WORDS ?= vendor/english-words/words_alpha.txt
 LETTERS ?= 3
 QUERIES ?= 4000
@@ -71,6 +79,20 @@ DATA_FILE ?= /tmp/hashtable-benchmark-keys.txt
 SIZE ?= 1024
 TREE_HEIGHT ?= 5
 SEED ?= 1
+CHAIN_KEYS ?= 500000
+CHAIN_TABLE ?= 4096
+CHAIN_HOT ?= 8
+BENCH_RUNS ?= 5
+
+run-chaining-compare: chaining_benchmark
+	./chaining_benchmark --suite compare --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
+
+run-chaining-compare-repeated: chaining_benchmark
+	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
+		--keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
+
+run-chaining-treeify: chaining_benchmark
+	./chaining_benchmark --suite treeify --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
 
 run-ngram-growth: ngram_calculation
 	./ngram_calculation --words $(WORDS)
