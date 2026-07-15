@@ -7,13 +7,15 @@ HASHTABLE_SRC = hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
 NGRAM_SRC = ngram.c $(HASHTABLE_SRC)
 COMMON_SRC = common/randstring.c
 
-BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles chaining_benchmark
+BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles chaining_benchmark inverted_chain_bench
 
 CHAINING_SRC = hashtable/chain_ht.c hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
 
 .PHONY: all clean help spe-unified spe-split \
 	run-ngram-growth run-inverted-index run-trie run-hashtable-benchmark run-quantiles \
 	run-chaining-compare run-chaining-treeify run-chaining-compare-repeated \
+	run-chaining-policy run-inverted-chain-bench run-chaining-uniform-repeated \
+	run-chaining-scale \
 	run-inverted-index-all run-trie-all run-hashtable-all run-quantiles-all
 
 all: $(BINARIES)
@@ -54,8 +56,10 @@ help:
 	@echo "  make run-chaining-compare CHAIN_KEYS=500000"
 	@echo "  make run-chaining-compare-repeated BENCH_RUNS=5 CHAIN_KEYS=500000"
 	@echo "  make run-chaining-treeify CHAIN_KEYS=500000"
-	@echo ""
-	@echo "Manuscript (Prism / SPE):"
+	@echo "  make run-chaining-policy CHAIN_KEYS=500000   # batch vs incremental hybrid"
+	@echo "  make run-chaining-uniform-repeated BENCH_RUNS=5  # uniform-only variance"
+	@echo "  make run-chaining-scale SCALE_KEYS=1048576     # fair in-memory same-API baseline"
+	@echo "  make run-inverted-chain-bench MAX_NGRAMS=256   # real posting-list replay"
 	@echo "  make spe-unified   # merge split .tex -> spe-manuscript.tex"
 	@echo "  make spe-split     # split spe-manuscript.tex -> draft-spe.tex + spe-body.tex + ..."
 
@@ -79,6 +83,10 @@ quantiles: quantiles.c qtree/qtree.c
 chaining_benchmark: chaining_benchmark.c $(CHAINING_SRC) $(COMMON_SRC)
 	$(CC) $(CFLAGS) -Ihashtable -Icommon chaining_benchmark.c $(CHAINING_SRC) $(COMMON_SRC) -o $@
 
+inverted_chain_bench: inverted_chain_bench.c ngram.c common/lineio.c $(CHAINING_SRC)
+	$(CC) $(CFLAGS) -Ihashtable -Icommon inverted_chain_bench.c ngram.c common/lineio.c \
+		$(CHAINING_SRC) -o $@
+
 WORDS ?= vendor/english-words/words_alpha.txt
 LETTERS ?= 3
 QUERIES ?= 4000
@@ -101,8 +109,42 @@ run-chaining-compare-repeated: chaining_benchmark
 	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
 		--keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
 
+# Uniform-only variance: no skew between repetitions (avoids confounding).
+run-chaining-uniform-repeated: chaining_benchmark
+	@echo "=== uniform list ==="
+	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
+		--mode list --workload uniform --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) \
+		--hot-buckets $(CHAIN_HOT) --seed $(SEED)
+	@echo "=== uniform hybrid-batch ==="
+	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
+		--mode hybrid --workload uniform --policy batch --treeify 8 \
+		--keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
+	@echo "=== uniform hybrid-incremental ==="
+	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
+		--mode hybrid --workload uniform --policy incremental --treeify 8 \
+		--keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
+	@echo "=== uniform tree ==="
+	./scripts/bench_repeat.sh $(BENCH_RUNS) ./chaining_benchmark --suite compare \
+		--mode tree --workload uniform --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) \
+		--hot-buckets $(CHAIN_HOT) --seed $(SEED)
+
+run-chaining-scale: chaining_benchmark
+	./chaining_benchmark --suite scale --keys $(SCALE_KEYS) --table-size $(SCALE_TABLE) --seed $(SEED)
+
+SCALE_KEYS ?= 1048576
+SCALE_TABLE ?= 65536
+
 run-chaining-treeify: chaining_benchmark
 	./chaining_benchmark --suite treeify --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) --hot-buckets $(CHAIN_HOT) --seed $(SEED)
+
+run-chaining-policy: chaining_benchmark
+	./chaining_benchmark --suite policy --keys $(CHAIN_KEYS) --table-size $(CHAIN_TABLE) \
+		--hot-buckets $(CHAIN_HOT) --seed $(SEED) --treeify 8
+
+run-inverted-chain-bench: inverted_chain_bench
+	./inverted_chain_bench --words $(WORDS) --max-ngrams $(MAX_NGRAMS)
+
+MAX_NGRAMS ?= 2048
 
 run-ngram-growth: ngram_calculation
 	./ngram_calculation --words $(WORDS)

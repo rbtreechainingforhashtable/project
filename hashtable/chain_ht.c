@@ -27,9 +27,11 @@ struct chain_ht_t {
 	uint64_t allocated;
 	uint64_t (*hash_func)(const char *key);
 	chain_mode_t mode;
+	treeify_policy_t treeify_policy;
 	uint8_t treeify_threshold;
 	uint64_t lookup_comparisons;
 	uint64_t max_bucket_size;
+	uint64_t treeify_events;
 };
 
 uint64_t chain_ht_lookup_comparisons(const chain_ht_t *ht) {
@@ -42,6 +44,10 @@ uint64_t chain_ht_max_bucket_size(const chain_ht_t *ht) {
 
 uint64_t chain_ht_count(const chain_ht_t *ht) {
 	return ht ? ht->count : 0;
+}
+
+uint64_t chain_ht_treeify_events(const chain_ht_t *ht) {
+	return ht ? ht->treeify_events : 0;
 }
 
 static uint64_t tree_node_heap_bytes(const node_t *node) {
@@ -145,7 +151,8 @@ static void bucket_free_nodes(bucket_t *bucket) {
 }
 
 chain_ht_t *chain_ht_new(uint64_t size, uint64_t (*hash_func)(const char *key),
-                         chain_mode_t mode, uint8_t treeify_threshold) {
+                         chain_mode_t mode, uint8_t treeify_threshold,
+                         treeify_policy_t policy) {
 	chain_ht_t *ht = calloc(1, sizeof(*ht));
 
 	if (!ht)
@@ -161,6 +168,7 @@ chain_ht_t *chain_ht_new(uint64_t size, uint64_t (*hash_func)(const char *key),
 	ht->hash_func = hash_func;
 	ht->mode = mode;
 	ht->treeify_threshold = treeify_threshold;
+	ht->treeify_policy = policy;
 	return ht;
 }
 
@@ -177,33 +185,20 @@ void chain_ht_free(chain_ht_t *ht) {
 	free(ht);
 }
 
-static int bucket_insert(chain_ht_t *ht, bucket_t *bucket, char *key, void *data,
-                         uint64_t hash_sum) {
-	int rc;
-
-	if (ht->mode == CHAIN_MODE_TREE) {
-		if (tree_insert(&bucket->u.tree, key, hash_sum, data))
-			return 1;
-		return 0;
-	}
-
-	rc = bucket_insert_list(bucket, key, data);
-	if (rc != 1)
-		return rc;
-
-	return 1;
-}
-
 void chain_ht_finalize(chain_ht_t *ht) {
 	uint64_t i;
 
 	if (!ht || ht->mode != CHAIN_MODE_HYBRID)
 		return;
+	if (ht->treeify_policy != TREEIFY_POLICY_BATCH)
+		return;
 
 	for (i = 0; i < ht->allocated; ++i) {
 		bucket_t *bucket = &ht->buckets[i];
-		if (!bucket->as_tree && bucket->count >= ht->treeify_threshold)
+		if (!bucket->as_tree && bucket->count >= ht->treeify_threshold) {
 			bucket_treeify(bucket, ht->hash_func);
+			++ht->treeify_events;
+		}
 	}
 }
 
@@ -221,11 +216,19 @@ int chain_ht_insert(chain_ht_t *ht, char *key, void *data) {
 			return 0;
 		++bucket->count;
 	} else {
-		inserted = bucket_insert(ht, bucket, key, data, hash_sum);
+		inserted = bucket_insert_list(bucket, key, data);
 		if (inserted == 2)
 			return 1;
 		if (!inserted)
 			return 0;
+
+		/* Java-style: convert this bin as soon as it becomes long. */
+		if (ht->mode == CHAIN_MODE_HYBRID &&
+		    ht->treeify_policy == TREEIFY_POLICY_INCREMENTAL &&
+		    bucket->count >= ht->treeify_threshold) {
+			bucket_treeify(bucket, ht->hash_func);
+			++ht->treeify_events;
+		}
 	}
 
 	++ht->count;
@@ -236,7 +239,8 @@ int chain_ht_insert(chain_ht_t *ht, char *key, void *data) {
 }
 
 void chain_ht_reset_stats(chain_ht_t *ht) {
-	ht->lookup_comparisons = 0;
+	if (ht)
+		ht->lookup_comparisons = 0;
 }
 
 void *chain_ht_get(chain_ht_t *ht, const char *key) {

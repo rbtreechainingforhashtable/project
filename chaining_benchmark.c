@@ -16,12 +16,16 @@ typedef enum {
 
 typedef struct bench_result {
 	const char *label;
+	const char *policy_label;
 	double insert_seconds;
+	double mid_lookup_seconds;
 	double search_seconds;
 	uint64_t comparisons;
+	uint64_t mid_comparisons;
 	uint64_t max_bucket;
 	uint64_t count;
 	uint64_t heap_bytes;
+	uint64_t treeify_events;
 } bench_result;
 
 static uint64_t skew_bucket_hash(const char *key) {
@@ -52,19 +56,29 @@ static void gen_skew_key(char *buf, size_t buflen, uint64_t bucket_id, uint64_t 
 	snprintf(buf, buflen, "%04" PRIu64 ":%016" PRIu64 ":%s", bucket_id, seq, suffix);
 }
 
+static const char *policy_name(treeify_policy_t policy) {
+	return policy == TREEIFY_POLICY_INCREMENTAL ? "incremental" : "batch";
+}
+
 static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t treeify_threshold,
-                               uint64_t key_count, uint64_t table_size, uint64_t hot_buckets,
-                               size_t key_len, unsigned seed, bench_result *out) {
+                               treeify_policy_t policy, uint64_t key_count, uint64_t table_size,
+                               uint64_t hot_buckets, size_t key_len, unsigned seed,
+                               uint64_t mix_every, uint64_t mix_probes, bench_result *out) {
 	chain_ht_t *ht;
 	uint64_t (*hash_func)(const char *key) = fnv;
 	char **keys;
 	struct timespec insert_start;
 	struct timespec insert_end;
+	struct timespec mid_start;
+	struct timespec mid_end;
 	struct timespec search_start;
 	struct timespec search_end;
 	uint64_t i;
+	uint64_t mid_comparisons = 0;
+	double mid_lookup_seconds = 0.0;
 	const char *mode_label = mode == CHAIN_MODE_LIST ? "list"
 		: mode == CHAIN_MODE_TREE ? "tree" : "hybrid";
+	static char hybrid_label[48];
 
 	srand(seed);
 	keys = calloc(key_count, sizeof(*keys));
@@ -74,7 +88,7 @@ static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t t
 	if (workload == WORKLOAD_SKEW)
 		hash_func = skew_bucket_hash;
 
-	ht = chain_ht_new(table_size, hash_func, mode, treeify_threshold);
+	ht = chain_ht_new(table_size, hash_func, mode, treeify_threshold, policy);
 	if (!ht) {
 		free(keys);
 		return 1;
@@ -102,13 +116,34 @@ static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t t
 			free(keys);
 			return 1;
 		}
+
+		/*
+		 * Interleaved mid-load probes: under batch hybrid these still walk lists;
+		 * under incremental hybrid long bins are already trees.
+		 */
+		if (mix_every > 0 && mix_probes > 0 && ((i + 1) % mix_every) == 0) {
+			uint64_t p;
+			uint64_t before = chain_ht_lookup_comparisons(ht);
+
+			timespec_now(&mid_start);
+			for (p = 0; p < mix_probes; ++p) {
+				uint64_t idx = (i * 2654435761ull + p * 97ull) % (i + 1);
+				if (!chain_ht_get(ht, keys[idx])) {
+					fprintf(stderr, "mid lookup miss at i=%llu idx=%llu\n",
+						(unsigned long long)i, (unsigned long long)idx);
+					chain_ht_free(ht);
+					for (uint64_t j = 0; j <= i; ++j)
+						free(keys[j]);
+					free(keys);
+					return 1;
+				}
+			}
+			timespec_now(&mid_end);
+			mid_lookup_seconds += timespec_elapsed_sec(&mid_start, &mid_end);
+			mid_comparisons += chain_ht_lookup_comparisons(ht) - before;
+		}
 	}
-	if (chain_ht_count(ht) != key_count) {
-		fprintf(stderr, "inserted count mismatch: got %llu expected %llu\n",
-			(unsigned long long)chain_ht_count(ht),
-			(unsigned long long)key_count);
-	}
-	if (mode == CHAIN_MODE_HYBRID)
+	if (mode == CHAIN_MODE_HYBRID && policy == TREEIFY_POLICY_BATCH)
 		chain_ht_finalize(ht);
 	timespec_now(&insert_end);
 
@@ -128,34 +163,46 @@ static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t t
 	timespec_now(&search_end);
 
 	if (mode == CHAIN_MODE_HYBRID) {
-		static char hybrid_label[32];
-		snprintf(hybrid_label, sizeof(hybrid_label), "hybrid-%u", treeify_threshold);
+		snprintf(hybrid_label, sizeof(hybrid_label), "hybrid-%u-%s",
+			 treeify_threshold, policy_name(policy));
 		out->label = hybrid_label;
 	} else {
 		out->label = mode_label;
 	}
+	out->policy_label = mode == CHAIN_MODE_HYBRID ? policy_name(policy) : "n/a";
 	out->insert_seconds = timespec_elapsed_sec(&insert_start, &insert_end);
+	out->mid_lookup_seconds = mid_lookup_seconds;
 	out->search_seconds = timespec_elapsed_sec(&search_start, &search_end);
 	out->comparisons = chain_ht_lookup_comparisons(ht);
+	out->mid_comparisons = mid_comparisons;
 	out->max_bucket = chain_ht_max_bucket_size(ht);
 	out->count = chain_ht_count(ht);
 	out->heap_bytes = chain_ht_heap_bytes(ht);
+	out->treeify_events = chain_ht_treeify_events(ht);
 
 	fprintf(stderr,
-		"experiment=chaining-benchmark workload=%s mode=%s treeify=%u keys=%llu table=%llu hot_buckets=%llu "
-		"insert_seconds=%.3f search_seconds=%.3f comparisons=%llu avg_comparisons=%.3f max_bucket=%llu heap_bytes=%llu\n",
+		"experiment=chaining-benchmark workload=%s mode=%s policy=%s treeify=%u keys=%llu table=%llu "
+		"hot_buckets=%llu mix_every=%llu mix_probes=%llu insert_seconds=%.3f mid_lookup_seconds=%.3f "
+		"search_seconds=%.3f comparisons=%llu mid_comparisons=%llu avg_comparisons=%.3f "
+		"max_bucket=%llu heap_bytes=%llu treeify_events=%llu\n",
 		workload == WORKLOAD_UNIFORM ? "uniform" : "skew",
 		out->label,
+		out->policy_label,
 		treeify_threshold,
 		(unsigned long long)key_count,
 		(unsigned long long)table_size,
 		(unsigned long long)hot_buckets,
+		(unsigned long long)mix_every,
+		(unsigned long long)mix_probes,
 		out->insert_seconds,
+		out->mid_lookup_seconds,
 		out->search_seconds,
 		(unsigned long long)out->comparisons,
+		(unsigned long long)out->mid_comparisons,
 		key_count ? (double)out->comparisons / key_count : 0.0,
 		(unsigned long long)out->max_bucket,
-		(unsigned long long)out->heap_bytes);
+		(unsigned long long)out->heap_bytes,
+		(unsigned long long)out->treeify_events);
 
 	chain_ht_free(ht);
 	for (i = 0; i < key_count; ++i)
@@ -186,29 +233,72 @@ static void print_lookup_model(void) {
 
 static void usage(const char *prog) {
 	fprintf(stderr,
-		"Usage: %s --suite {compare,treeify,model} [options]\n"
+		"Usage: %s --suite {compare,treeify,policy,scale,model} [options]\n"
 		"\n"
 		"Options:\n"
 		"  --keys N           Number of keys (default 500000)\n"
 		"  --table-size N     Hash table size (default 4096)\n"
 		"  --hot-buckets N    Skew buckets (default 8)\n"
 		"  --key-len N        Random suffix length (default 8)\n"
-		"  --mode NAME        list, tree, or hybrid (compare suite only)\n"
-		"  --workload NAME    uniform or skew (compare suite only)\n"
-		"  --treeify N        Hybrid threshold (default 8)\n",
+		"  --mode NAME        list, tree, or hybrid\n"
+		"  --workload NAME    uniform or skew\n"
+		"  --treeify N        Hybrid threshold (default 8)\n"
+		"  --policy NAME      batch (default) or incremental\n"
+		"  --mix-every N      Interleaved mid-load probes every N inserts (0=off)\n"
+		"  --mix-probes N     Probes per mid-load sample (default 64)\n"
+		"\n"
+		"Suites:\n"
+		"  scale   In-memory uniform list / hybrid-batch / hybrid-incremental / tree\n"
+		"          (fair same-API baseline; no disk I/O)\n",
 		prog);
+}
+
+static int parse_mode(const char *name, chain_mode_t *mode) {
+	if (!strcmp(name, "list"))
+		*mode = CHAIN_MODE_LIST;
+	else if (!strcmp(name, "tree"))
+		*mode = CHAIN_MODE_TREE;
+	else if (!strcmp(name, "hybrid"))
+		*mode = CHAIN_MODE_HYBRID;
+	else
+		return 1;
+	return 0;
+}
+
+static int parse_workload(const char *name, workload_t *workload) {
+	if (!strcmp(name, "uniform"))
+		*workload = WORKLOAD_UNIFORM;
+	else if (!strcmp(name, "skew"))
+		*workload = WORKLOAD_SKEW;
+	else
+		return 1;
+	return 0;
+}
+
+static int parse_policy(const char *name, treeify_policy_t *policy) {
+	if (!strcmp(name, "batch"))
+		*policy = TREEIFY_POLICY_BATCH;
+	else if (!strcmp(name, "incremental"))
+		*policy = TREEIFY_POLICY_INCREMENTAL;
+	else
+		return 1;
+	return 0;
 }
 
 int main(int argc, char **argv) {
 	const char *suite = NULL;
 	const char *mode_name = NULL;
 	const char *workload_name = NULL;
+	const char *policy_name_arg = "batch";
 	uint8_t treeify_threshold = 8;
+	treeify_policy_t policy = TREEIFY_POLICY_BATCH;
 	uint64_t key_count = 500000;
 	uint64_t table_size = 4096;
 	uint64_t hot_buckets = 8;
 	size_t key_len = 8;
 	unsigned seed = 1;
+	uint64_t mix_every = 0;
+	uint64_t mix_probes = 64;
 	uint8_t thresholds[] = {255, 8, 4, 2, 1, 0};
 	size_t ti;
 
@@ -249,6 +339,18 @@ int main(int argc, char **argv) {
 			treeify_threshold = (uint8_t)strtoul(argv[++i], NULL, 10);
 			continue;
 		}
+		if (!strcmp(argv[i], "--policy") && i + 1 < argc) {
+			policy_name_arg = argv[++i];
+			continue;
+		}
+		if (!strcmp(argv[i], "--mix-every") && i + 1 < argc) {
+			mix_every = strtoull(argv[++i], NULL, 10);
+			continue;
+		}
+		if (!strcmp(argv[i], "--mix-probes") && i + 1 < argc) {
+			mix_probes = strtoull(argv[++i], NULL, 10);
+			continue;
+		}
 		if (!strcmp(argv[i], "--seed") && i + 1 < argc) {
 			seed = (unsigned)strtoul(argv[++i], NULL, 10);
 			continue;
@@ -264,6 +366,11 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	if (parse_policy(policy_name_arg, &policy) != 0) {
+		fprintf(stderr, "unknown policy: %s\n", policy_name_arg);
+		return 1;
+	}
+
 	if (!strcmp(suite, "model")) {
 		print_lookup_model();
 		return 0;
@@ -273,42 +380,37 @@ int main(int argc, char **argv) {
 		bench_result result;
 
 		if (mode_name && workload_name) {
-			chain_mode_t mode = CHAIN_MODE_HYBRID;
-			workload_t workload = WORKLOAD_UNIFORM;
+			chain_mode_t mode;
+			workload_t workload;
 
-			if (!strcmp(mode_name, "list"))
-				mode = CHAIN_MODE_LIST;
-			else if (!strcmp(mode_name, "tree"))
-				mode = CHAIN_MODE_TREE;
-			else if (!strcmp(mode_name, "hybrid"))
-				mode = CHAIN_MODE_HYBRID;
-			else {
+			if (parse_mode(mode_name, &mode) != 0) {
 				fprintf(stderr, "unknown mode: %s\n", mode_name);
 				return 1;
 			}
-
-			if (!strcmp(workload_name, "uniform"))
-				workload = WORKLOAD_UNIFORM;
-			else if (!strcmp(workload_name, "skew"))
-				workload = WORKLOAD_SKEW;
-			else {
+			if (parse_workload(workload_name, &workload) != 0) {
 				fprintf(stderr, "unknown workload: %s\n", workload_name);
 				return 1;
 			}
 
-			return run_chain_benchmark(workload, mode, treeify_threshold, key_count,
-			                           table_size, hot_buckets, key_len, seed, &result);
+			return run_chain_benchmark(workload, mode, treeify_threshold, policy, key_count,
+			                           table_size, hot_buckets, key_len, seed, mix_every,
+			                           mix_probes, &result);
 		}
 
-		chain_mode_t modes[] = {CHAIN_MODE_LIST, CHAIN_MODE_HYBRID, CHAIN_MODE_TREE};
-		uint8_t treeify[] = {255, 8, 0};
-		workload_t workloads[] = {WORKLOAD_UNIFORM, WORKLOAD_SKEW};
+		/* Default compare keeps historical batch hybrid behaviour. */
+		{
+			chain_mode_t modes[] = {CHAIN_MODE_LIST, CHAIN_MODE_HYBRID, CHAIN_MODE_TREE};
+			uint8_t treeify[] = {255, 8, 0};
+			workload_t workloads[] = {WORKLOAD_UNIFORM, WORKLOAD_SKEW};
 
-		for (size_t w = 0; w < 2; ++w) {
-			for (size_t m = 0; m < 3; ++m) {
-				if (run_chain_benchmark(workloads[w], modes[m], treeify[m], key_count,
-				                        table_size, hot_buckets, key_len, seed, &result) != 0)
-					return 1;
+			for (size_t w = 0; w < 2; ++w) {
+				for (size_t m = 0; m < 3; ++m) {
+					if (run_chain_benchmark(workloads[w], modes[m], treeify[m],
+					                        TREEIFY_POLICY_BATCH, key_count,
+					                        table_size, hot_buckets, key_len, seed,
+					                        0, 0, &result) != 0)
+						return 1;
+				}
 			}
 		}
 		return 0;
@@ -316,16 +418,88 @@ int main(int argc, char **argv) {
 
 	if (!strcmp(suite, "treeify")) {
 		bench_result result;
+		workload_t workload = WORKLOAD_SKEW;
 
-		for (ti = 0; ti < sizeof(thresholds); ++ti) {
+		if (workload_name && parse_workload(workload_name, &workload) != 0) {
+			fprintf(stderr, "unknown workload: %s\n", workload_name);
+			return 1;
+		}
+
+		for (ti = 0; ti < sizeof(thresholds) / sizeof(thresholds[0]); ++ti) {
 			chain_mode_t mode = thresholds[ti] == 255 ? CHAIN_MODE_LIST
 				: thresholds[ti] == 0 ? CHAIN_MODE_TREE : CHAIN_MODE_HYBRID;
 			uint8_t threshold = thresholds[ti] == 255 ? 255 : thresholds[ti];
 
-			if (run_chain_benchmark(WORKLOAD_SKEW, mode, threshold, key_count,
-			                        table_size, hot_buckets, key_len, seed, &result) != 0)
+			if (run_chain_benchmark(workload, mode, threshold, policy, key_count,
+			                        table_size, hot_buckets, key_len, seed, mix_every,
+			                        mix_probes, &result) != 0)
 				return 1;
 		}
+		return 0;
+	}
+
+	/*
+	 * Hero suite: batch vs incremental hybrid under bulk load and mixed load,
+	 * with always-tree and list baselines.
+	 */
+	if (!strcmp(suite, "policy")) {
+		bench_result result;
+		treeify_policy_t policies[] = {TREEIFY_POLICY_BATCH, TREEIFY_POLICY_INCREMENTAL};
+		workload_t workloads[] = {WORKLOAD_UNIFORM, WORKLOAD_SKEW};
+		size_t w;
+		size_t p;
+
+		for (w = 0; w < 2; ++w) {
+			if (run_chain_benchmark(workloads[w], CHAIN_MODE_LIST, 255,
+			                        TREEIFY_POLICY_BATCH, key_count, table_size,
+			                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+				return 1;
+			if (run_chain_benchmark(workloads[w], CHAIN_MODE_TREE, 0,
+			                        TREEIFY_POLICY_BATCH, key_count, table_size,
+			                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+				return 1;
+			for (p = 0; p < 2; ++p) {
+				if (run_chain_benchmark(workloads[w], CHAIN_MODE_HYBRID, treeify_threshold,
+				                        policies[p], key_count, table_size, hot_buckets,
+				                        key_len, seed, 0, 0, &result) != 0)
+					return 1;
+			}
+		}
+
+		/* Mixed insert/lookup probes on skew: where batch hybrid still scans lists. */
+		for (p = 0; p < 2; ++p) {
+			if (run_chain_benchmark(WORKLOAD_SKEW, CHAIN_MODE_HYBRID, treeify_threshold,
+			                        policies[p], key_count, table_size, hot_buckets,
+			                        key_len, seed, mix_every ? mix_every : 10000,
+			                        mix_probes, &result) != 0)
+				return 1;
+		}
+		return 0;
+	}
+
+	/*
+	 * Fair in-memory scale baseline: same API, uniform keys, no disk I/O.
+	 * Default CLI often uses --keys 1048576 --table-size 65536.
+	 */
+	if (!strcmp(suite, "scale")) {
+		bench_result result;
+
+		if (run_chain_benchmark(WORKLOAD_UNIFORM, CHAIN_MODE_LIST, 255,
+		                        TREEIFY_POLICY_BATCH, key_count, table_size,
+		                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+			return 1;
+		if (run_chain_benchmark(WORKLOAD_UNIFORM, CHAIN_MODE_HYBRID, treeify_threshold,
+		                        TREEIFY_POLICY_BATCH, key_count, table_size,
+		                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+			return 1;
+		if (run_chain_benchmark(WORKLOAD_UNIFORM, CHAIN_MODE_HYBRID, treeify_threshold,
+		                        TREEIFY_POLICY_INCREMENTAL, key_count, table_size,
+		                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+			return 1;
+		if (run_chain_benchmark(WORKLOAD_UNIFORM, CHAIN_MODE_TREE, 0,
+		                        TREEIFY_POLICY_BATCH, key_count, table_size,
+		                        hot_buckets, key_len, seed, 0, 0, &result) != 0)
+			return 1;
 		return 0;
 	}
 

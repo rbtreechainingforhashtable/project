@@ -60,6 +60,7 @@ inverted_index
 /trie
 hashtable_benchmark
 chaining_benchmark
+inverted_chain_bench
 /tmp/hashtable-benchmark-keys.txt
 other-ht/ht_tommy
 other-ht/newdata.txt

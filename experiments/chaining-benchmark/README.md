@@ -11,7 +11,7 @@ Microbenchmark comparing three bucket policies in the **same** C API (`hashtable
 Workloads:
 
 - **uniform** — FNV hash over random string keys (well spread across buckets)
-- **skew** — keys `"BBBB:seq:suffix"` where `BBBB` is the bucket id; hash function returns the bucket id so ~all keys land in `hot-buckets` bins
+- **skew** (CLI name) — **forced-bucket chaining stress**: keys `"BBBB:seq:suffix"` where `BBBB` is the bucket id; hash returns that id so keys land in `hot-buckets` bins. This is a per-bucket overflow probe (hash quality held out), not Zipf hash skew over the full table. Empirically long lengths come from the posting-list CDF / replay (`inverted_chain_bench`), not from claiming eight equal megachains are a realistic hash mix.
 
 ## Methodology
 
@@ -59,5 +59,5 @@ experiment=chaining-benchmark workload=... mode=... insert_seconds=... search_se
 
 ## Notes
 
-- Hybrid mode builds lists during insert and calls `chain_ht_finalize()` before the lookup phase (batch treeification), analogous to Java's per-bin conversion after overload.
-- The skew workload is intentionally extreme (`max_bucket ≈ keys / hot_buckets`) to show crossover versus list chaining; n-gram posting lists in the article are a real-world skewed case.
+- Hybrid **batch** builds lists during insert and calls `chain_ht_finalize()` before lookup; hybrid **incremental** converts as soon as a bin hits `k` (closer to Java).
+- Forced-bucket stress is intentionally extreme (`max_bucket ≈ keys / hot_buckets`) to isolate list vs treeify-policy cost inside long bins. Realism of *lengths* is the trigram posting CDF + chain replay, not the eight-bin routing pattern.
