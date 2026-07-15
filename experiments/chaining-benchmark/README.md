@@ -52,10 +52,10 @@ Each run prints one line to stderr:
 
 ```
 experiment=chaining-benchmark workload=... mode=... insert_seconds=... search_seconds=...
-  comparisons=... avg_comparisons=... max_bucket=...
+  comparisons=... avg_comparisons=... max_bucket=... heap_bytes=...
 ```
 
-`comparisons` counts `strcmp` calls during lookup (same metric for list and tree paths).
+`heap_bytes` is the structure footprint from `chain_ht_heap_bytes()` (buckets, nodes, and stored key strings). `comparisons` counts `strcmp` calls during lookup (same metric for list and tree paths).
 
 ## Notes
 

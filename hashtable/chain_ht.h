@@ -20,3 +20,4 @@ uint64_t chain_ht_lookup_comparisons(const chain_ht_t *ht);
 uint64_t chain_ht_max_bucket_size(const chain_ht_t *ht);
 uint64_t chain_ht_count(const chain_ht_t *ht);
 void chain_ht_finalize(chain_ht_t *ht);
+uint64_t chain_ht_heap_bytes(const chain_ht_t *ht);

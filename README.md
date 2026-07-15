@@ -1,6 +1,14 @@
 # RB-tree Chained Hash Table Experiments
 
-Code and benchmarks for the article *Using RB-tree chaining within a hash table*
+Code and benchmarks for the article *When to Treeify Hash Table Buckets* (SPE-oriented draft: `draft-spe.tex`; IEEE draft: `draft-ieee.tex`).
+
+## Manuscripts
+
+| File | Format |
+|------|--------|
+| `draft-spe.tex` | Software: Practice and Experience (single-column article) |
+| `draft-ieee.tex` | IEEE `IEEEtran` journal layout |
+| `docs/spe-submission.md` | SPE submission checklist |
 
 ## Experiments
 

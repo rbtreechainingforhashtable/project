@@ -21,6 +21,7 @@ typedef struct bench_result {
 	uint64_t comparisons;
 	uint64_t max_bucket;
 	uint64_t count;
+	uint64_t heap_bytes;
 } bench_result;
 
 static uint64_t skew_bucket_hash(const char *key) {
@@ -138,10 +139,11 @@ static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t t
 	out->comparisons = chain_ht_lookup_comparisons(ht);
 	out->max_bucket = chain_ht_max_bucket_size(ht);
 	out->count = chain_ht_count(ht);
+	out->heap_bytes = chain_ht_heap_bytes(ht);
 
 	fprintf(stderr,
 		"experiment=chaining-benchmark workload=%s mode=%s treeify=%u keys=%llu table=%llu hot_buckets=%llu "
-		"insert_seconds=%.3f search_seconds=%.3f comparisons=%llu avg_comparisons=%.3f max_bucket=%llu\n",
+		"insert_seconds=%.3f search_seconds=%.3f comparisons=%llu avg_comparisons=%.3f max_bucket=%llu heap_bytes=%llu\n",
 		workload == WORKLOAD_UNIFORM ? "uniform" : "skew",
 		out->label,
 		treeify_threshold,
@@ -152,7 +154,8 @@ static int run_chain_benchmark(workload_t workload, chain_mode_t mode, uint8_t t
 		out->search_seconds,
 		(unsigned long long)out->comparisons,
 		key_count ? (double)out->comparisons / key_count : 0.0,
-		(unsigned long long)out->max_bucket);
+		(unsigned long long)out->max_bucket,
+		(unsigned long long)out->heap_bytes);
 
 	chain_ht_free(ht);
 	for (i = 0; i < key_count; ++i)

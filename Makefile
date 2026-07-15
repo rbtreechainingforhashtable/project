@@ -11,12 +11,18 @@ BINARIES = ngram_calculation inverted_index trie hashtable_benchmark quantiles c
 
 CHAINING_SRC = hashtable/chain_ht.c hashtable/hashtable.c hashtable/rbtree.c hashtable/list.c
 
-.PHONY: all clean help \
+.PHONY: all clean help spe-unified spe-split \
 	run-ngram-growth run-inverted-index run-trie run-hashtable-benchmark run-quantiles \
 	run-chaining-compare run-chaining-treeify run-chaining-compare-repeated \
 	run-inverted-index-all run-trie-all run-hashtable-all run-quantiles-all
 
 all: $(BINARIES)
+
+spe-unified:
+	python3 scripts/build_spe_unified.py merge
+
+spe-split:
+	python3 scripts/build_spe_unified.py split
 
 help:
 	@echo "Build all experiments:"
@@ -48,6 +54,10 @@ help:
 	@echo "  make run-chaining-compare CHAIN_KEYS=500000"
 	@echo "  make run-chaining-compare-repeated BENCH_RUNS=5 CHAIN_KEYS=500000"
 	@echo "  make run-chaining-treeify CHAIN_KEYS=500000"
+	@echo ""
+	@echo "Manuscript (Prism / SPE):"
+	@echo "  make spe-unified   # merge split .tex -> spe-manuscript.tex"
+	@echo "  make spe-split     # split spe-manuscript.tex -> draft-spe.tex + spe-body.tex + ..."
 
 ngram_calculation: ngram_calculation.c common/lineio.c $(NGRAM_SRC)
 	$(CC) $(CFLAGS) -Ihashtable -Icommon ngram_calculation.c common/lineio.c $(NGRAM_SRC) -o $@

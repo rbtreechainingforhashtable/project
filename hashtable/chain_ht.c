@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "rbtree.h"
+#include "data.h"
 
 typedef struct chain_node {
 	char *key;
@@ -41,6 +42,51 @@ uint64_t chain_ht_max_bucket_size(const chain_ht_t *ht) {
 
 uint64_t chain_ht_count(const chain_ht_t *ht) {
 	return ht ? ht->count : 0;
+}
+
+static uint64_t tree_node_heap_bytes(const node_t *node) {
+	uint64_t bytes;
+
+	if (!node)
+		return 0;
+
+	bytes = sizeof(*node);
+	if (node->key)
+		bytes += strlen(node->key) + 1;
+
+	return bytes + tree_node_heap_bytes(node->left) + tree_node_heap_bytes(node->right);
+}
+
+static uint64_t bucket_heap_bytes(const bucket_t *bucket) {
+	uint64_t bytes = 0;
+
+	if (!bucket || !bucket->count)
+		return 0;
+
+	if (bucket->as_tree)
+		return tree_node_heap_bytes(bucket->u.tree.root);
+
+	for (chain_node_t *node = bucket->u.head; node; node = node->next) {
+		bytes += sizeof(*node);
+		if (node->key)
+			bytes += strlen(node->key) + 1;
+	}
+
+	return bytes;
+}
+
+uint64_t chain_ht_heap_bytes(const chain_ht_t *ht) {
+	uint64_t bytes;
+	uint64_t i;
+
+	if (!ht)
+		return 0;
+
+	bytes = sizeof(*ht) + ht->allocated * sizeof(*ht->buckets);
+	for (i = 0; i < ht->allocated; ++i)
+		bytes += bucket_heap_bytes(&ht->buckets[i]);
+
+	return bytes;
 }
 
 static void bucket_treeify(bucket_t *bucket, uint64_t (*hash_func)(const char *key)) {
